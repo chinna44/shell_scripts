@@ -1,0 +1,36 @@
+#!/bin/ksh
+if [ $# -lt 1 ]
+then
+  echo "Usage : $0 LOADBALANCER"
+  exit 1
+else
+  LOADBALANCER=`echo $1 | cut -d"." -f1`
+fi
+
+FOUND=0
+export http_proxy=http://proxy.verizon.com:80
+export https_proxy=http://proxy.verizon.com:80
+export NO_PROXY=169.254.169.254
+
+#### Get the LB ARN####
+LOADBALANCER_ARN=`aws elbv2 describe-load-balancers --name $LOADBALANCER --region us-east-1 2>/dev/null | grep LoadBalancerArn | cut -d"\"" -f4`
+if [ "$LOADBALANCER_ARN" = "" ]
+then
+  echo "LOADBALANCER $LOADBALANCER not found !!!"
+  exit 1
+else
+  echo LOADBALANCER_ARN=$LOADBALANCER_ARN
+fi
+
+#####Get the target Group ARN####
+for TARGETGROUP_ARN in `aws elbv2 describe-target-groups --load-balancer-arn $LOADBALANCER_ARN --region us-east-1 2>/dev/null | grep TargetGroupArn | cut -d "\"" -f4`
+do
+
+  FOUND=0
+  for i in `aws elbv2 describe-target-health --target-group-arn $TARGETGROUP_ARN --region us-east-1 2>/dev/null | grep '"Id"' |cut -d"\"" -f4`
+  do
+    aws ec2 describe-instance --region us-east-1 --instance-ids $i 2>/dev/null |grep PrivateIpAddress |head -1 |cut -d"\"" -f4`
+  done
+
+exit
+done
