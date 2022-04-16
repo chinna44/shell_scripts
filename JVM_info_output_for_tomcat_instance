@@ -1,0 +1,68 @@
+#!/bin/bash
+
+usage()
+{
+    echo "USAGE: TomcatJVMInfo.sh [ -p PID_NUMBER ] [ -d INSTANCE_NAME ]"
+	echo ""
+	exit 1
+}
+
+# look for a SSI file, for the INSTANCE_NAME provided.
+# if it can't find one, exit and complain
+set_ssi_file()
+{
+    SSIFILE=/apps/etc/SSI/host.`hostname`.tomcat.$INSTANCE_NAME
+	if [ ! -f $SSIFILE ]
+	then
+	        LOCALSSIFILE=/apps/etc/SSI/host.hostname.tomcat.$INSTANCE_NAME
+			if [ ! -f $LOCALSSIFILE ]
+			    then
+				        echo "SSI File is not found for Tomcat instance ${INSTANCE_NAME}... please investigate"
+						exit 1
+			else
+			    SSIFILE=/apps/etc/SSI/host.hostname.tomcat.$INSTANCE_NAME
+			fi
+	fi
+}
+
+#grab the ANCHOP, it's /apps
+ANCHOR=`cat /etc/default/Loc_Env_Anchor 2>/dev/null`
+if [ -z "$ANCHOR" ]
+then
+        echo "ERROR: Unable to determine the ANCHOR .. Exiting .."
+		exit 1
+fi
+
+export ANCHOR
+
+#Locate whoami
+
+    while getops p:d: opt
+	do
+	      case $opt in
+		  p)    PID_NUMBER=$OPTARG
+		  d)    INSTANCE=$OPTARG
+		  \?)   usage ;;
+	      esac
+    done
+	if [ -z "${PID_NUMBER}" ]
+	then
+	        usage
+	fi
+	
+	if [ -z "${INSTANCE_NAME}" ]
+	then
+	        usage
+	fi
+
+#### MAIN ####
+set_ssi_file
+. $SSIFILE
+
+LOGDIR=/apps/opt/ASF-Apache/domains/tomcat/${INSTANCE_NAME}/logs
+
+DATE=`date`
+
+$DOMAIN_JAVAHOME/bin/jinfo $PID_NUMBER >>$LOGDIR/jvm_info.out.$PID_NUMBER
+chmod 777 $LOGDIR/jvm_info.out.$PID_NUMBER
+chown jbtomcat:mdware $LOGDIR/jvm_info.out.$PID_NUMBER
