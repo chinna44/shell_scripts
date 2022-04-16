@@ -1,0 +1,64 @@
+cat deregister_instance_from_loadbalancer
+
+#!/bin/ksh
+if [ $# -lt 1 ]
+then
+  echo "Usage : $0 LOADBALANCER"
+  exit 1
+else
+  LOADBALANCER=`echo $1 | cut -d"." -f1`
+fi
+
+echo LOADBALANCER=$LOADBALANCER
+
+IPADDRESS=`hostname -i`
+if [ "$IPADDRESS"= "" ]
+then
+  echo "Unable to get IPADDRESS of server !!!"
+  exit 1
+else
+  echo $IPADDRESS
+fi
+
+#### get the Instance ID ####
+INSTANCEID=`aws ec2 describe-instance --region us-east-1 --filters "Name=network-interface.address.private-ip-address,Values=$IPADDRESS" 2>/dev/null | grep InstanceId |cut -d "\"" -f4`
+if [ "$INSTANCEID" = "" ]
+then
+  echo "INSTANCE id not found !!!"
+  exit 1
+else
+  echo $INSTANCEID
+fi
+
+echo deregistering from loadbalancer $LOADBALANCER
+
+
+####Get the LB ARN####
+
+LOADBALANCER_ARN=`aws elbv2 describe-load-balancers --name $LOADBALANCER --region us-east-1 2>/dev/null | grep LoadBalancerArn | cut -d"\"" -f4`
+if [ "$LOADBALANCER_ARN" = "" ]
+then
+  echo "LOADBALANCER $LOADBALANCER not found !!!"
+  exit 1
+else
+  echo LOADBALANCER_ARN=$LOADBALANCER_ARN
+fi
+
+for i in `aws elbv2 describe-target-groups --load-balancer-arn $LOADBALANCER_ARN --region us-east-1 2>/dev/null | grep TargetGroupArn | cut -d "\"" -f4`
+do 
+  TARGETGROUP_ARN=$i
+  echo TARGETGROUP_ARN=$TARGETGROUP_ARN
+  
+  aws elbv2 describe-target-health --target-group-arn $TARGETGROUP_ARN --region us-east-1 2>/dev/null | grep $IPADDRESS > dev/null
+  if [ $? -ne 0 ]
+  then 
+    echo "Server $INSTANCEID not registered with LOADBALANCER $LOADBALANCER !!!"
+	exit 1
+  fi
+  
+  aws elbv2 deregister-targets --target-group-arn $TARGETGROUP_ARN --targets Id=$IPADDRESS --region us-east-1 2>/dev/null
+  if [ $? -eq 0 ]
+  then
+    echo "Successfully deregistered $IPADDRESS from LOADBALANCER $LOADBALANCER"
+  fi
+done
