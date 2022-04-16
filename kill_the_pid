@@ -1,0 +1,2 @@
+SLAVE_PID=`ps -ef|grep -v grep | grep slave|awk '{print $2}'`
+kill -9 $SLAVE_PID
