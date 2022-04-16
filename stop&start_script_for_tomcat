@@ -1,0 +1,36 @@
+start () {
+        if [ -f $CATALINA_HOME/bin/start.sh ];
+	    then
+	          echo $"Stopping tomcat"
+			  /bin/su $TOMCAT_USER -C $CATALINA_HOME/bin/start.sh
+			  
+	    fi
+}
+
+stop () {
+        if [ -f $CATALINA_HOME/bin/shutdown.sh ];
+	    then 
+              echo $"Stopping tomcat"
+			  $CATALINA_HOME/bin/shutdown.sh
+        fi
+		
+}
+
+case $"1" in
+start)
+        start
+;;
+stop)
+        stop
+;;
+restart)
+        stop
+		start
+;;
+*)
+        echo $"usage: $0 {start|stop|restart}
+		exit 1
+;;
+esac
+
+exit $RETVAL
