@@ -1,0 +1,12 @@
+#!/bin/bash
+list_of_containers="nginx hnm-apps-west hnm-apps cd-server"
+containers=`docker ps -f status=running --format "{{.Names}}"`
+for container in $list_of_containers
+do
+  if echo $containers | grep -q $container
+     then echo "$container is online"
+  else echo "$container is offline"
+     exit 1
+  fi
+done
+exit 0
