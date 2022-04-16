@@ -1,0 +1,22 @@
+LOCKFILE=/apps/var/tmp/PINGLOCK
+
+#check to see if /apps/var is there, if not.. create it
+if [ ! -d /apps/var ]
+then
+    mkdir /apps/var; mkdir /apps/var/tmp/PINGLOCK
+fi
+
+#now check for /apps/var/tmp, if not there.. create it
+if [ ! -d /apps/var/tmp ]
+then 
+    mkdir /apps/var/tmp
+fi
+
+#Now check to see if PINGLOCK is there
+if [ -f $LOCKFILE ]
+then
+    rm $LOCKFILE
+	exit 0
+else
+    touch LOCKFILE
+fi
