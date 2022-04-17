@@ -1,0 +1,25 @@
+
+#!/bin/bash
+set -x
+d=`date +%F_%H%M`
+
+fs=`df -h /apps/opt/ASF-Apache | awk '{print $5}' | grep [0-9] | /usr/bin/tr -d '\%'`
+SERVER="`hostname`"
+if [[ $fs -gt 80 ]];
+then
+####Acces_log####
+tar -czvf /apps/opt/ASF-Apache/domains/tomcat/HNM/logs/access_log.txt_$d.tar.gz /apps/opt/ASF-Apache/domains/tomcat/HNM/logs/access_log.txt
+> /apps/opt/ASF-Apache/domains/tomcat/HNM/logs/access_log.txt
+tar -czvf /apps/opt/ASF-Apache/domains/tomcat/HNM1/logs/access_log.txt_$d.tar.gz /apps/opt/ASF-Apache/domains/tomcat/HNM1/logs/access_log.txt
+> /apps/opt/ASF-Apache/domains/tomcat/HNM1/logs/access_log.txt
+####catalina.out####
+tar -czvf /apps/opt/ASF-Apache/domains/tomcat/HNM/logs/catalina.out_$d.tar.gz /apps/opt/ASF-Apache/domains/tomcat/HNM/logs/catalina.out
+> /apps/opt/ASF-Apache/domains/tomcat/HNM/logs/catalina.out
+tar -czvf /apps/opt/ASF-Apache/domains/tomcat/HNM1/logs/catalina.out_$d.tar.gz /apps/opt/ASF-Apache/domains/tomcat/HNM1/logs/catalina.out
+> /apps/opt/ASF-Apache/domains/tomcat/HNM1/logs/catalina.out
+
+find /apps/opt/ASF-Apache/domains/tomcat/HNM/logs/ -type f -mtime +3 -name '*.gz' | xargs -r rm
+find /apps/opt/ASF-Apache/domains/tomcat/HNM1/logs/ -type f -mtime +3 -name '*.gz' | xargs -r rm
+fi
+
+x=`df -h /apps | awk '{print $5}'`
