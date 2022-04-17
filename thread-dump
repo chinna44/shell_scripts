@@ -1,0 +1,23 @@
+cat get_the_thread_dumps
+echo "INFO: Starting to collect 5 thread dumps against the process $PID_NUMBER"
+for i in 1 2 3 4 5
+do 
+    echo "INFO: Sending thread dump number $i to Tomcat pid# $PID_NUMBER"
+	kill -3 $PID_NUMBER
+	sleep 5
+done
+echo "INFO: Finished collecting thread dumps..."
+#Now, send the pid a kill -9 to bring it down
+echo "INFO: Sending a kill -9 signal to Tomcat pid# $PID_NUMBER"
+kill -9 $PID_NUMBER
+
+PIDFILE=/apps/opt/ASF-Apache/domains/tomcat/${DOMAINNAME}/run/*.pid
+
+#Check if the pid file is there, and if it is, remove it
+if [ -f $PIDFILE ]
+then
+        echo "INFO: Found stale pid file, and removing it..."
+		rm $PIDFILE
+else
+        echo "INFO: Did not find a stale pid file... processing..."
+fi
