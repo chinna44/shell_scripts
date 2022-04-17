@@ -1,0 +1,69 @@
+#!/bin/ksh
+echo "ASF Apache HTTP and Tomcat Server packages installed on `hostname`:" > ./get_ahsrpminfo.txt
+date '+DATE: %m/%d/%y/%tTIME:%H:%M:%S' >> ./get_ahsrpminfo.txt
+echo -e "================================== \n" >> ./get_ahsrpminfo.txt
+echo -e "ASF Apache Tomcat packages installed on `hostname`: \n"
+echo -e "================================== \n"
+
+for i in `rpm -q -a | egrep 'VZahs'`
+do
+echo "Installed: `rpm -q $i`" | sed 's/noarch/rpm' | tee -a ./get_ahsrpminfo.txt
+done
+
+echo -e "Do you want to run pkgchk? (y/n) \c "
+read ans
+
+if [ $ans = y ]
+then
+
+for i in `rpm -q -a | egrep 'VZahs'`
+do
+echo -e "Checking ASF Apache Tomcat packages installed on `hostname`: \n"
+echo -e "================================== \n"
+echo -e "================================== \n" >> ./get_ahsrpminfo.txt
+echo "\nChecking $i .... " >> ./get_ahsrpminfo.txt
+pkgname=`echo $i | cut -d '-' -f1`
+export pkgname
+echo "package is $pkgname"
+rpm -V $pkgname | grep -v "\.\.\.\.\.\.\.T" | tee -a ./get_ahsrpminfo.txt
+done
+fi
+
+echo -e "Do you want to email the get_ahsrpminfo.txt to your self (y/n) \c "
+read answer
+
+if [ answer = y ]
+then
+echo -e "Enter email address -. \n"
+echo -e "ex. mark.w.slifer@verizon.com \n"
+echo -e "Email address: \c"
+read EMAIL 
+cat ./get_ahsrpminfo.txt | mailx -s "ASF Pkginfo for `hostname`" $EMAIL
+fi
+
+
+
+=================================
+cat get_the_thread_dumps
+echo "INFO: Starting to collect 5 thread dumps against the process $PID_NUMBER"
+for i in 1 2 3 4 5
+do 
+    echo "INFO: Sending thread dump number $i to Tomcat pid# $PID_NUMBER"
+	kill -3 $PID_NUMBER
+	sleep 5
+done
+echo "INFO: Finished collecting thread dumps..."
+#Now, send the pid a kill -9 to bring it down
+echo "INFO: Sending a kill -9 signal to Tomcat pid# $PID_NUMBER"
+kill -9 $PID_NUMBER
+
+PIDFILE=/apps/opt/ASF-Apache/domains/tomcat/${DOMAINNAME}/run/*.pid
+
+#Check if the pid file is there, and if it is, remove it
+if [ -f $PIDFILE ]
+then
+        echo "INFO: Found stale pid file, and removing it..."
+		rm $PIDFILE
+else
+        echo "INFO: Did not find a stale pid file... processing..."
+fi
