@@ -1,0 +1,16 @@
+#!/bin/bash
+set -x
+d=`date +%F_%H%M`
+
+fs=`df -h /apps/opt/ASF-Apache | awk '{print $5}' | grep [0-9] | /usr/bin/tr -d '\%'`
+SERVER="`hostname`"
+if [[ $fs -gt 80 ]];
+then
+########Access_log########
+tar -czvf /apps/opt/apache/logs/access_log.txt_$d.tar.gz /apps/opt/ASF-Apache/logs/access_log.txt
+>/apps/opt/ASF-Apache/logs/access_log.txt
+########catalina_log########
+tar -czvf /apps/opt/apache/logs/catalina_log.txt_$d.tar.gz /apps/opt/ASF-Apache/logs/catalina_log.txt
+>/apps/opt/ASF-Apache/logs/catalina_log.txt
+
+find /apps/opt/ASF-Apache/logs/ -type f -mtime +3 -name '*.gz' | xargs -r rm
