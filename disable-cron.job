@@ -1,0 +1,13 @@
+#!/bin/ksh
+cd /home/hnmuser
+echo "Saving a cron file name - cron.good"
+crontab -l > crontab.good
+if [ $? -ne 0 ]
+then
+  echo "Cron did not get saved.. Not removing the cron."
+  exit
+else
+  echo "Removing Cron"
+  crontab -r
+  crontab -l
+fi
