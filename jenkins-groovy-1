@@ -1,0 +1,105 @@
+pipeline {
+    agent any
+
+    parameters {
+        string name: 'env', defaultValue: 'prd'
+        choice name: 'branch', choices: [ 'master', 'qa' ]
+    }
+    
+    environment {
+        AWS_ACCESS_KEY_ID = credentials('Access_key')
+        AWS_SECRET_ACCESS_KEY = credentials('Secret_key')
+        TASK_DEFINITION_NAME = apache-td
+        region = "us-east-2"
+        serviceName = "web-service"
+        port = "80"
+        Memory = "256"
+        CPU = "256"
+        CLUSTER_NAME = "giridhar"
+        count = "1"
+        aws_acc_id = "444843055205"
+        REPOSITORY_URI = "444843055205.dkr.ecr.us-east-2.amazonaws.com/docker-image-ecs-apache:latest"
+        REPO = "https://github.com/chinna44/docker-image-apache-on-ecs.git"
+        Branch = "${branch}"
+    }
+
+    stages {
+        stage('checkout the github code') {
+            steps {
+                git branch: Branch, url: REPO, credentialsId: 'jenkins_cred'
+            }
+        }
+        stage('build the docker image') {
+            steps {
+                sh 'docker build -t docker-image-ecs-apache .'
+            }
+        }
+        stage('Push the image to ECR') {
+            steps {
+                sh '''
+                   set +x
+                   echo " Assuming the sts-assume-role..."
+                   source ${WORKSPACE}/stsassumerole.sh
+                   aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 444843055205.dkr.ecr.us-east-2.amazonaws.com
+                   docker tag docker-image-ecs-apache:latest 444843055205.dkr.ecr.us-east-2.amazonaws.com/docker-image-ecs-apache:latest
+                   docker push 444843055205.dkr.ecr.us-east-2.amazonaws.com/docker-image-ecs-apache:latest
+                '''
+            }
+        stage('create task definition') {
+            steps {
+                sh '''
+                    set +x
+                    echo " Assuming the sts-assume-role..."
+                    source ${WORKSPACE}/stsassumerole.sh
+                    aws ecs register-task-definition \
+                    --region $region \
+                    --family $TASK_DEFINITION_NAME \
+                    --container-definitions "[{\\"name\\": \\"$serviceName\\",  \\"image\\": \\"$REPOSITORY_URI\\", \\"portMappings\\": [{\\"containerPort\\": $port, \\"hostPort\\": $port, \\"protocol\\": \\"tcp\\"}], \\"essential\\": true, \\"cpu\\": $CPU, \\"memory\\": $Memory}]"
+                '''
+            }
+        }       
+        stage('create a service') {
+            steps { 
+                sh ''' 
+                    set +x
+                    echo " Assuming the sts-assume-role..."
+                    source ${WORKSPACE}/stsassumerole.sh
+                    // TASK_REVISION=$(aws ecs describe-task-definition --region $region --task-definition $TASK_DEFINITION_NAME | jq .taskDefinition.revision) 
+                    TASK_REVISION=$(aws ecs describe-task-definition --region $region --task-definition $TASK_DEFINITION_NAME | egrep "revision" | awk '{print $2}' | sed 's/,/ /')
+                    echo $TASK_REVISION                
+                    CLUSTER_STATUS=$(aws ecs describe-clusters --clusters $CLUSTER_NAME --region $region --query clusters[0].status --output text)
+                    echo $CLUSTER_STATUS        
+                    if [ "$CLUSTER_STATUS" == "ACTIVE" ]
+                    then
+                         SERVICE_STATUS=$(aws ecs list-services --cluster $CLUSTER_NAME --region $region --output text)
+                         if echo $SERVICE_STATUS | grep $serviceName
+                         then
+                            aws ecs update-service \
+                            --cluster $CLUSTER_NAME \
+                            --region $region \
+                            --service $serviceName \
+                            --task-definition $TASK_DEFINITION_NAME:$TASK_REVISION \
+                            --force-new-deployment
+                         else
+                            aws ecs create-service \
+                            --task-definition $TASK_DEFINITION_NAME:$TASK_REVISION \
+                            --cluster $CLUSTER_NAME \
+                            --region $region \
+                            --desired-count $count \
+                            --service-name $serviceName \
+                            --deployment-configuration minimumHealthyPercent=50 \
+                            --launch-type EC2
+                         fi
+                    else
+                       echo "could not find any cluster... create a new cluster $CLUSTER_NAME"
+                    fi
+                '''
+            }
+        }        
+    }
+}
+
+
+
+
+--container-definitions "[{\\"name\\": \\"$serviceName\\", \\"image\\": \\"\$(echo $registry | sed 's/https:\\/\\///')/$imageName:$imageTag\\", \\"essential\\": true, \\"mountPoints\\": [{\\"sourceVolume\\": \\"efs_mount_point_id\\", \\"containerPath\\": \\"$containerPath\\"}], \\"secrets\\": [{\\"name\\": \\"gamma.dex.kinesis.producer.stream\\", \\"valueFrom\\": \\"$kinesisProducerStreamName\\"}, {\\"name\\": \\"gamma.kinesis.application.name\\", \\"valueFrom\\": \\"$gammaDexConsumer\\"}, {\\"name\\": \\"gamma.kinesis.consumer.stream\\", \\"valueFrom\\": \\"$kinesisConsumerStreamName\\"}], \\"environment\\": [{\\"name\\": \\"aws.region\\", \\"value\\": \\"$REGION\\"}, {\\"name\\": \\"gamma.btr.enabled\\", \\"value\\": \\"true\\"}, {\\"name\\": \\"async.kinesis.pool.size\\", \\"value\\": \\"$aSyncKinesisPoolSize\\"}, {\\"name\\": \\"gamma.logging.caller-data\\", \\"value\\": \\"$gammaLoggingCallerData\\"}, {\\"name\\": \\"gamma.logging.level\\", \\"value\\": \\"$gammaLoggingLevel\\"}, {\\"name\\": \\"rules.disable\\", \\"value\\": \\"$rulesDisable\\"}, {\\"name\\": \\"efs.async.write.poolSize\\", \\"value\\": \\"$efsAsyncWritePoolsize\\"}, {\\"name\\": \\"gamma.region\\", \\"value\\": \\"$gammaRegion\\"}, {\\"name\\": \\"kpl.aggregation-max-count\\", \\"value\\": \\"$kplAggregationMaxCount\\"}, {\\"name\\": \\"kpl.aggregation-max-size\\", \\"value\\": \\"$kplAggregationMaxSize\\"}, {\\"name\\": \\"kpl.record-max-buffered-time\\", \\"value\\": \\"$kplRecordMaxbufferedTime\\"}, {\\"name\\": \\"kpl.record-ttl\\", \\"value\\": \\"$kplRecordttl\\"}, {\\"name\\": \\"gamma.data.extractor.jdbc.grc.datasource.username\\", \\"value\\": \\"$grcDatasourceUsername\\"},{\\"name\\": \\"gamma.data.extractor.jdbc.grc.datasource.jdbc-url\\", \\"value\\": \\"$grcDatasourceUrl\\"}, {\\"name\\": \\"gamma.data.extractor.jdbc.btr.datasource.username\\", \\"value\\": \\"$btrDatasourceUsername\\"},{\\"name\\": \\"gamma.data.extractor.jdbc.btr.datasource.jdbc-url\\", \\"value\\": \\"$btrDatasourceUrl\\"}], \\"portMappings\\": [{\\"containerPort\\": $port, \\"protocol\\": \\"tcp\\"}], \\"dockerLabels\\": {\\"traefik.frontend.rule\\": \\"Host:$traefik_domain\\", \\"traefik.enable\\": \\"true\\", \\"traefik.protocol\\": \\"http\\", \\"traefik.port\\": \\"$port\\"}, \\"logConfiguration\\": {\\"logDriver\\": \\"awslogs\\", \\"options\\": {\\"awslogs-create-group\\": \\"true\\", \\"awslogs-group\\": \\"$ecs_cluster_ContainerLog\\", \\"awslogs-region\\": \\"$REGION\\", \\"awslogs-stream-prefix\\": \\"$serviceName\\"}}}]"
