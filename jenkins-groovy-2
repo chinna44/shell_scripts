@@ -1,0 +1,212 @@
+pipeline {
+    options {
+        ansiColor('xterm')
+        buildDiscarder logRotator(artifactDaysToKeepStr: '1', artifactNumToKeepStr: '1', daysToKeepStr: '', numToKeepStr: '15')
+          disableConcurrentBuilds()
+    }
+
+    environment {
+        directory = "dataextractorprocessor"
+        infra     = "dev"
+        registry  = "https://690554025895.dkr.ecr.us-east-1.amazonaws.com"
+        traefik_domain = "extractor-gamma17.dev.nonprod.na.nissancloud.com"
+        imageName = "gamma17/dataextractor"
+        imageTag  = "latest"
+        REGION = "us-east-1"
+        serviceName = "gamma17-nna-dev-extractor"
+        ecs_cluster = "gamma17-nna-dev"
+
+        memory = "2048"
+        port = "8080"
+        count = "1"
+        ROLEARN = "arn:aws:iam::690554025895:role/Jenkins-Role-NNA-Prod"
+        taskRole = "arn:aws:iam::690554025895:role/gamma17-nna-dev-DataExtractor-TaskRole-us-east-1"
+        execRole = "arn:aws:iam::690554025895:role/gamma17-nna-dev-TaskExecutionRole-us-east-1"
+        // projectkey = "APX10409"
+        ecs_cluster_ContainerLog = "gamma17-nna-dev-ContainerLogs"
+        containerPath = "/gamma/efs"
+
+        //secret
+        KinesisProducerStreamName = "/application/gamma17-nna-dev/Extractor/KinesisProducerStreamName"
+        KinesisConsumerStreamName = "/application/gamma17-nna-dev/Extractor/KinesisConsumerStreamName"
+        gammaDexConsumer = "/application/gamma17-nna-dev/Extractor/GAMMA_DEX_CONSUMER"
+        //environment
+        efsAsyncWritePoolsize = "50"
+        gammaRegion = "NNA"
+        kplAggregationMaxCount = "200"
+        kplAggregationMaxSize = "1048576"
+        kplRecordMaxbufferedTime = "15000"
+        kplRecordttl = "120000"
+
+        //Newparams
+        aSyncKinesisPoolSize = "20"
+            gammaLoggingCallerdata = "FALSE"
+        gammaLoggingLevel = "INFO"
+            rulesDisable = "dex-cw-probe-ddi"
+
+        grcDatasourceUsername = "databases/postgres/gammaodometer-dev-rw"
+        grcDatasourceUrl = "jdbc-secretsmanager:postgresql://gammaodometer-dev.cluster-ccjvyj2swlsj.us-east-1.rds.amazonaws.com/gammaodometerdev?currentSchema=grc"
+        btrDatasourceUsername = "databases/postgres/gammaodometer-dev-rw"
+        btrDatasourceUrl = "jdbc-secretsmanager:postgresql://gammaodometer-dev.cluster-ccjvyj2swlsj.us-east-1.rds.amazonaws.com/gammaodometerdev?currentSchema=btr"   
+    }
+
+    agent { label 'fargate-prod-jenkins-slave-nna' }
+
+    stages {
+        stage(Clone Repo) {
+            steps {
+                script {
+                def scmVars = checkout([$class: 'GitSCM', branches: [[name: "${env.GITBRANCH}"]], doGenerateSubmoduleConfiguration: false, extensions: [[$class: 'CloneOption', noTags: false, refernce: '', shallow: true]], submoduleCfg: [], userRemoteConfig's: [[credentialsId: "BitBucket-Admin", url: "${env.GIT_URL}"]]])
+                env.GIT_COMM = scmVars.GITCOMMIT.substring(0,8)
+                }
+            }
+        }
+    
+        stage('Jenkins Shared Repo Checkout') {
+            steps {
+                echo 'Checking out shared scripts from bitbucket'
+                dir('jenkins-shared') {
+                    git branch: "master", "https://bitbucket.aws.na.nissancloud.biz/scm/dev/jenkins-libraries.git", credentialsId: 'BitBucket-Admin'
+                }           
+            }
+        }
+
+        stage("CIS Scan") {
+            steps {
+                script {
+                    try {
+                        dir("dockerfile-scanner") {
+                            title "Check Dockerfile for CIS compliance"
+                            checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "BitBucket-Admin", url: '$DOCKERFILESCANNER_REPO']]])
+                            sh "python3 scanner.py ../${directory}/Dockerfile"
+                            env.tag = "m"
+                        }                      
+                    } catch(Exception error) {
+                        warn "WARN: code quality tests failed!"
+                        currentBuild.result = "UNSTABLE"
+                        env.tag = "w" 
+                    }                      
+                }
+            }
+        }
+
+        stage("Build") {
+            steps {
+                echo '******** lets grab the properties ********'
+                    echo 'CHANGE_ID ' + env.CHANGE_ID
+                    echo 'GIT_COMMIT ' + env.GIT_COMMIT
+                    echo 'GIT_BRANCH ' + env.GIT_BRANCH
+                    echo 'GIT_LOCAL_BRANCH ' + env.GIT_LOCAL_BRANCH
+                    echo 'GIT_PREVIOUS_COMMIT ' + env.GIT_PREVIOUS_COMMIT
+                    echo 'GIT_PREVIOUS_SUCCESSFUL_COMMIT ' + env.GIT_PREVIOUS_SUCCESSFUL_COMMIT
+                    echo 'GIT_URL ' + env.GIT_URL
+                    echo 'GIT_URL_N - ' + env.GIT_URL_N
+                    echo 'GIT_AUTHORA_NAME ' + env.GIT_AUTHORA_NAME
+                    echo 'CHANGE_AUTHOR ' + env.CHANGE_AUTHOR
+                    echo 'GIT_COMMITTER_EMAIL ' + env.GIT_COMMITTER_EMAIL
+                    echo env.TAG_NAME
+                    echo env.TAG_NAME_GIT_HASH
+
+                    title '******** START - Build Maven Pipeline ********'
+                    withMaven(maven: 'Maven', mavenSettingsConfig: 'Gamma-Maven-Settings', tempBinDir: '') {
+                    sh "mvn --properties ${directory} --also-make clean package -Dmaven.test.skip=true"
+                    sh "ls -ltr ${directory}/target"
+                        }
+                    title '******** END - Build Maven Pipeline ********'    
+            }
+        }
+
+        stage('stash Artifact') {
+            steps {
+                title "********* Stash Artifact ********"
+                stash includes: "**/${directory}/target/*.jar", name: "${directory}"
+            }    
+        }
+
+        stage("Docker Phase") {
+            
+            agent { label 'ec2-prod-jenkins-slave-nna' }
+
+                stages {
+
+                    stage('jenkins Shared Repo Checkout') {
+
+                        steps {
+                        echo 'Checking out shared scripts from Bit Bucket'
+                        dir('jenkins-shared') {
+                            git branch: "master", url: "https://bitbucket.aws.na.nissancloud.biz/scm/dev/jenkins-libraries.git", credentialsId: "BitBucket-Admin"
+                          }    
+                        }
+                    }
+
+                    stage('Pull Artifacts') {
+                        steps {
+                            title "Unstash Artifact"
+                            unstash "${directory}"
+                            script {
+                                sh """
+                                cd ${directory}/target
+                                ls -ltr
+                                """
+                            }
+                        }
+                    }
+
+                    stage("Docker Image") {
+                        steps {
+                            title "Build and tag the docker Image"
+                            script {
+                                dir("./${directory}") {
+                                sh "docker build -t ${imageName} -f Dockerfile ."
+                                }
+                            }
+                        }
+                    }
+               //Push Image to ecr
+                    stage("Push to registry") {
+                        steps {
+                            script {
+                                title "Push the Docker image to registry"
+                                sh """
+                                    set +x 
+                                    echo 'Assuming Role ....'
+                                    source ${WORKSPACE}/jenkins-shared/scripts/ce/aws-assume-role.sh ${ROLEARN}
+                                    eval \$(aws ecr get-login --region $REGION --no-include-email)
+                                """
+                                docker.withRegistry(registry) {
+                                    docker.image(imageName).push("${env.tag}-${infra}-${env.GIT_COMM}")
+                                    //docker.image(imageName).push("${env.BUILD_NUMBER}")
+                                    docker.image(imageName).push('latest')
+                                }    
+                                title "Remove untagged images from registry"
+                                sh """
+                                    set +x 
+                                    echo 'Assuming Role ....'
+                                    source ${WORKSPACE}/jenkins-shared/scripts/ce/aws-assume-role.sh ${ROLEARN}
+                                    eval \$(aws ecr get-login --region $REGION --no-include-email)
+                                    aws ecr list-images --region $REGION --repository-name $imageName --filter tagStatus=UNTAGGED --query 'imageIds[*]' --output text | while read imageId; do aws ecr batch-delete-image --region $REGION --repository-name $imageName --image-ids imageDigest=\$imageId; done
+                                """
+                            }
+                        }
+                    }
+ 
+                    stage("Deploy to Dev") {
+                        steps {
+                            title "Update the Task Definition"
+                            sh '''
+                                echo 'Assuming Role ....'
+                                source ${WORKSPACE}/jenkins-shared/scripts/ce/aws-assume-role.sh ${ROLEARN}
+                                aws ecr get-login --region $REGION --no-include-email
+                                aws ecs register-task-definition \
+                                    --task-role-arn $taskRole
+                                    --execution-role-arn $execRole
+                                    --region $REGION
+                                    --family "TD-$serviceName" \
+                                    --volumes "[{\\"}]"
+
+                        }
+                    }
+                }
+        }            
+    }
+}
